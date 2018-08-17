@@ -1,0 +1,31 @@
+###########################################################################################
+#Author :@Abhishek Ranjan                                                                ##
+#Email: abhishek.ranjan@oronetworks.com                                                  ##
+#Description: Script to get list of all files/folders from path /lunera/code/*/current   ##
+###########################################################################################
+# Set the PATH and TERM because piping a script to sshpass via STDIN does not initialize a terminal
+export PATH=$PATH:/usr/local/sbin:/usr/sbin:/sbin
+export TERM=xterm
+
+#!/bin/bash
+rm -f diff.html
+rm -f diff1.html
+cd /home/scripts/file-diff/public-api
+./public-api.sh
+
+cd /home/scripts/file-diff/data-api
+./data-api.sh
+
+cd /home/scripts/file-diff/daemon
+./data-daemon.sh
+
+cd /home/scripts/file-diff/particle-sqs
+./particle-sqs.sh
+
+cd /home/scripts/file-diff/asset-tracking
+./asset-tracking.sh
+::diffoff!
+#ws s3 cp  --acl public-read diff.html s3://lunera-deploy/
+
+#ttps://s3.us-east-2.amazonaws.com/lunera-deploy/diff.html > file-list
+
