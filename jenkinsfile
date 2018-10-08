@@ -1,0 +1,97 @@
+pipeline {
+    agent{
+        label 'Slave'
+    }
+    parameters{
+        string (
+            name: 'SN_VERSION',
+            description: 'ENTER THE VERSION TAG'
+        )
+        choice(
+            choices: 'ENG',
+            description: 'ENTER THE ENVIRONMENT',
+            name: 'ENV_NAME'
+        )
+        string (
+            name: 'TARGET_GROUP',
+            defaultValue: 'servicenow-service',
+            description: 'Specify Target group name here. It will detach instance from that group and deploy and will attach it. '
+        )
+    }
+    stages {
+        stage ('SCM CHECKOUT') {
+            steps {
+                
+                //CHECKOUT FROM LUNERA GIT REPO
+                sh '''
+                  rm -rf repo/
+                '''
+                checkout([$class: 'GitSCM', branches: [
+                    [name: 'refs/tags/${SN_VERSION}']
+                ], 
+                doGenerateSubmoduleConfigurations: false, extensions:[
+                    [$class: 'RelativeTargetDirectory', relativeTargetDir: 'repo']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '9fd16851-fb2d-417a-bde7-bd247e13cfb8', url: 'https://github.com/Lunera/service-now.git']]])
+                
+                sh '''
+                  rm -rf tools/
+                '''
+                checkout([$class: 'GitSCM', branches: [
+                    [name: 'master']
+                ], 
+                doGenerateSubmoduleConfigurations: false, extensions: [
+                    [$class: 'RelativeTargetDirectory', relativeTargetDir: 'tools']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '9fd16851-fb2d-417a-bde7-bd247e13cfb8', url: 'https://github.com/Lunera/tools.git']]])
+
+            }
+        }
+        stage ('BUILD') {
+            steps{
+                sh '''
+                cd repo
+                export PATH=$PATH:/home/build/.local/bin
+                sed -i \'s/0.0.1/\'"${SN_VERSION}"\'/g\' build.gradle
+                cat build.gradle
+                chmod +x gradlew
+                ./gradlew distTar'''
+            }
+        }
+        
+         stage ('IMAGE UPLOAD') {
+            steps {
+                //upload tar to S3 lunera bucket 
+                sh '''
+                    aws s3 cp --acl public-read  --region 'us-east-2' build/distributions/service-now-${SN_VERSION%}.tar s3://lunera-images
+                    aws s3 cp --region 'us-east-2' tools/deploy/safe-deploy/deploy-service.sh s3://lunera-images/safe-deploy/deploy-service.sh
+                '''
+            }
+        }
+        stage('DEPLOY TO ENG01') {
+            steps {
+                sh '''
+                 REMOTE_CMD="aws s3 cp s3://lunera-images/safe-deploy/deploy-service.sh /tmp/deploy-service.sh && sh /tmp/deploy-service.sh service-now ${SN_VERSION} ${TARGET_GROUP}"
+                 ssh -tt -i /home/jenkins/.ssh/LuneraDev.pem -o "StrictHostKeyChecking no"  ubuntu@eng01.dev.lunera.com $REMOTE_CMD
+                '''
+            }
+        }
+        stage('CHECK HEALTH DEPLOYMENT') {
+            steps {
+                sh '''
+                    cd tools/deploy/safe-deploy
+                    if [ "$(python wait_chk_deploy_health.py ${TARGET_GROUP})" = "False" ]; then
+                        exit 1
+                    fi
+                    echo "Eng01 healthy..."
+                '''
+            }
+        }
+        stage ('DEPLOY TO ENG02'){
+            steps {
+                sh '''
+                    echo "20 seconds wait to make it healthy from initial"
+                    sleep 20
+                    REMOTE_CMD="aws s3 cp s3://lunera-images/safe-deploy/deploy-service.sh /tmp/deploy-service.sh && sh /tmp/deploy-service.sh service-now ${SN_VERSION} ${TARGET_GROUP}"
+                    ssh -tt -i /home/jenkins/.ssh/LuneraDev.pem -o "StrictHostKeyChecking no"  ubuntu@eng02.dev.lunera.com $REMOTE_CMD
+                '''
+            }
+        }
+    }
+}
