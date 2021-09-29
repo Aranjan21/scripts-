@@ -25,12 +25,6 @@ password='wi3ALDNxVj9vPZGQ'
 rdsserver='rds.dev.lunera.com'
 
 
-host='rds.dev.lunera.com'
-username_prod = 'admin'
-password_prod = 'jaksdrey837465023grf9'
-dbname='Lunera_Production'
-
-
 def getschema():
 
         conn = pymssql.connect(rdsserver, username, password, dbname)
